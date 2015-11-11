@@ -1,0 +1,11 @@
+/* function returning number of free blocks.*/
+int numfree(int N,int n,int r){
+int result;
+n=floor((N-102)/101);
+r=(N-102)%101;
+if (r=0)
+  result=n;
+else
+  result=n+r;
+return result;
+}
