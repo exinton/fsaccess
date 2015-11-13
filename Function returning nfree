@@ -1,0 +1,25 @@
+/* function returning number of free blocks.*/
+#include <stdio.h>
+
+int main(void)
+{
+
+int y = numfree(1000);
+printf("ifree is %d \n",y);
+return 0;
+}
+
+int numfree(int N)
+{
+
+  int n=((N-102)/101);
+  int r=(N-102)%101;
+  if (r=0)
+        {
+        return n;
+        }
+  else
+      {
+    return n+1;
+      }
+}
