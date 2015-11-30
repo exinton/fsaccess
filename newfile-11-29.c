@@ -15,7 +15,14 @@
 int sh_test(char **);
 int sh_exit(char **);
 int sh_initfs(char **);
+int sh_ls(char **);
+int sh_cpin(char **);
+int sh_cpout(char **);
+int sh_mkdir(char **);
+
+int static currentPathInode=1;
 int static initblock[4]={0,0,0,0};
+char static *selectedDisk;
 
 struct superblock {
 	unsigned short isize[1];
@@ -32,32 +39,44 @@ struct superblock {
 
 
 struct inodeFlag{
-	unsigned int alloc:1;
-	  unsigned int fileType:2;
-	  unsigned int largeFile:1;
-	  unsigned int setUid:1;
-	  unsigned int setGrp:1;
-	  unsigned int unalloc:1;
-	  unsigned int readOwner:1;
-	  unsigned int writeOwner:1;
-	  unsigned int exeOwner:1;
-	  unsigned int wregrp:3;
-	  unsigned int wreothers:3;
+	unsigned alloc:1;
+	unsigned fileType:2;
+	unsigned largeFile:1;
+	unsigned setUid:1;
+	unsigned setGrp:1;
+	unsigned unalloc:1;
+	unsigned readOwner:1;
+	unsigned writeOwner:1;
+	unsigned exeOwner:1;
+	unsigned wregrp:3;
+	unsigned wreothers:3;
 }park;
 
 struct inode{  //inode's length is 32 in total
-	struct inodeFlag flag;
+	struct inodeFlag inodeFlagStruct;
 	char nlinks[1];		//number of links for files
 	char uid[1];
 	char gid[1];
 	char size0[1];
-	unsigned short size1[1];
-	unsigned short address[8][1];	//address of data blocks pointing to
-	unsigned short acttime[2][1];	//time of last access
-	unsigned short modtime[2][1];	//time of last modification
+	unsigned short size1;
+	unsigned short address[8];	//address of data blocks pointing to
+	unsigned short acttime[2];	//time of last access
+	unsigned short modtime[2];	//time of last modification
+}inode_empty={{0,0,0,0,0,0,0,0,0,0,0},0,0,0,0,0,{0,0,0,0,0,0,0,0},{0,0},{0,0}};
+
+typedef struct Inode MyInode;
+
+
+
+struct dirEntryLayout{
+
+	unsigned short inode0;
+	char	filename0[14];
+
 };
 
 
+int static fd;//file descripter for the disk
 
 
 /*
@@ -67,14 +86,22 @@ struct inode{  //inode's length is 32 in total
 char *builtin_str[] = {  //pointer to command strings
   "q",
   "test",
-  "initfs"
+  "initfs",
+  "v6ls",
+  "cpin",
+  "cpout",
+  "v6mkdir"
 };
 
 
 int (*builtin_func[]) (char **) = {  //pointer to  function
   &sh_exit,
   &sh_test,
-  &sh_initfs
+  &sh_initfs,
+  &sh_ls,
+  &sh_cpin,
+  &sh_cpout,
+  &sh_mkdir
 };
 
 int sh_num_builtins() {
@@ -103,7 +130,192 @@ int sh_test(char **args)
 
 }
 
-//calculate the nfree size
+
+int sh_cpin(char **args)
+{
+
+	 //trouble shooting print out
+	  printf("fsaccess\n");
+	  printf( "You entered: %s %s %s %s \n ", args[0],args[1], args[2]);
+	  char *sourceFilePath = args[1];
+	  char *destinationFilePath = args[2];
+
+	  //open source file
+	  //cp souce file's datablock content to destination and descend the count(source file size), as well as increase the destination file's size.
+	  //when the source file's remaingint count is less than 512, handle the last data block properly
+	  //
+
+
+	  return 1;
+
+
+
+
+
+
+}
+
+int sh_cpout(char **args)
+{
+
+	//get to the address and find datablock
+	struct inode MyInode,*ptr_inode;
+	ptr_inode=&MyInode;
+	int numberReaded =read (fd,ptr_inode,202);
+
+	//check whether the inode is directory
+	if(MyInode.inodeFlagStruct.fileType!=2){
+		printf("target is not directory");
+		return -1;
+
+	}
+
+	 return 1;
+
+}
+
+int fetch_directoryLayoutentry(int inode,int fd){
+
+	int position=lseek(fd,512*2+(inode-1)*32,SEEK_SET);
+
+		//get to the address and find datablock
+		struct inode MyInode,*ptr_inode;
+		ptr_inode=&MyInode;
+		int numberReaded =read (fd,ptr_inode,32);
+
+		printf("datablock address %d\n",MyInode.address[0]);
+
+		position=lseek(fd,512*MyInode.address[0],SEEK_SET);
+		int i;
+		struct dirEntryLayout dirEntry0,*ptr_dirEntry;
+			ptr_dirEntry=&dirEntry0;
+
+		for (i=0;i<512;i=i+16){
+			int numberReaded =read (fd,ptr_dirEntry,16);
+			printf("file inode %d, file name %s \n",dirEntry0.inode0,dirEntry0.filename0);
+			if(dirEntry0.inode0==0){
+					return 512*MyInode.address[0]+i;
+			}
+
+		}
+
+		return -1;
+}
+
+
+
+
+
+int sh_mkdir(char **args)
+{
+	selectedDisk=&("disktest");
+	printf("hanging here");
+	int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
+	 //trouble shooting print out
+	printf("fsaccess\n");
+	printf( "You entered: %s %s %s %s \n ", args[0],args[1], args[2]);
+	//char *newDirectory = args[1];
+	//get the file descriptor
+
+
+
+	//CHECK THE PERMIT
+
+	//check same directory name
+
+	//check the length of the directory no more than 15 chars.
+
+	printf("currentpathinode %d fd %d \n",currentPathInode,fd);
+	int entryAddress=fetch_directoryLayoutentry(currentPathInode,fd);
+	if(entryAddress==-1)
+	{
+		printf("reach the maximum files number under the folder \n");
+		return -1;
+	}
+
+	int dirInode=get_block(fd);
+
+	int position=lseek(fd,entryAddress,SEEK_SET);
+	struct dirEntryLayout dirEntry0,*ptr_dirEntry;
+	ptr_dirEntry=&dirEntry0;
+	dirEntry0.inode0=dirInode;
+	strcpy(dirEntry0.filename0, args[1]);
+	int numberWrited=write(fd,ptr_dirEntry,16);
+
+
+	//get to the address and find datablock
+
+
+
+	//if datablock has no empty entry, then search next availabe datablock
+
+	//get an empty entry's address in the databloc?lseek, if no ,return 0;
+
+	//get a free datablock
+
+
+	//if all datablock is filled, return error;
+	//initial the new directory
+
+	 return 1;
+
+}
+
+
+//list the directory layout of current path
+int sh_ls(char **args)
+{
+
+	  //open the file as partition
+	selectedDisk=&("disktest");
+	printf("hanging here");
+	int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
+	printf("fd is %d,selectedDisk is %c \n",fd,*selectedDisk);
+	//go to the nfree of the current path inode
+	int position=lseek(fd,512*2,SEEK_SET);//
+	struct inode inode0,*ptr_inode;
+	ptr_inode=&inode0;
+	int numberReaded =read (fd,ptr_inode,32);
+
+	//check the addresses of the inode
+
+	int i;
+	for (i=0;i<8;i=i+1)
+	{
+		printf("Dir DB addresses are %d \n",inode0.address[i]);
+	if(inode0.address[i]!=0)
+		{
+
+		printDirLayout(fd,inode0.address[i]);
+
+
+		}
+	}
+
+	close(fd);
+return 1;
+
+}
+
+void printDirLayout(int fd, int datablockofDir)
+{
+
+struct dirEntryLayout directory0,*ptr_directory;
+ptr_directory=&directory0;
+int position=lseek(fd,512*datablockofDir,SEEK_SET);//
+
+int i;
+for (i=0;i<32;i=i+1){
+	int numberReaded =read (fd,ptr_directory,16);
+	if(directory0.inode0!=0)
+	{
+		printf("inode number: %d, file name %s\n",directory0.inode0,directory0.filename0);
+	}
+
+
+}
+}
+
 
 
 
@@ -360,7 +572,8 @@ void init_inode(int fd, int *inodeInputArray){
 	struct inodeFlag inodeFlag0,*ptr_inodeFlag;
 	struct inode inode0, *ptr_inode;
 	ptr_inode=&inode0;
-	inode0.flag.alloc=1;
+	inode0.inodeFlagStruct.alloc=1;
+
 
 
 }
@@ -389,34 +602,44 @@ void clear_block(int fd, int blockNumber){
 
 }
 
-void init_root_directory(int fd){
+void init_directory(int inode,int fd){
 
-	//get inode
-	lseek(fd,512*2+32*(0)+8,SEEK_SET);
 
+	struct inode inode0,*ptr_inode;
+	ptr_inode=&inode0;
+	inode0=inode_empty;
 
 	//init_inode(fd,directory);
 	int blockNumber=get_block(fd);
+	printf("assigned block number is %d",blockNumber);
+	inode0.address[0]=blockNumber;
 
-	int address[2][1];
-	address[0][0]=blockNumber;
-	address[1][0]=1;
+	//get inode' address
+	lseek(fd,2*512+(inode-1)*32,SEEK_SET);
+	printf("address id %d",inode0.address[0]);
+	int numberWrited=write(fd,ptr_inode,32);
 
-	int numberWrited=write(fd,address[0][0],2);
+
 
 	//manipulate the data blocks
 
 	clear_block(fd,blockNumber);
 	printf(" hanging inside init_root! really \n");
 	lseek(fd,512*blockNumber,SEEK_SET);
-	char pathName[2][1];
-	pathName[0][0]=".";
-	pathName[1][0] ="..";
-	numberWrited=write(fd,address[1][0],2);
-	numberWrited=write(fd,pathName[0][0],14);
 
-	numberWrited=write(fd,address[1][0],2);
-	numberWrited=write(fd,pathName[1][0],14);
+	struct dirEntryLayout directory0,*ptr_dir;
+	ptr_dir=&directory0;
+
+	strcpy(directory0.filename0,".");
+	directory0.inode0=1;
+
+	numberWrited=write(fd,ptr_dir,16);
+
+	strcpy(directory0.filename0,"..");
+	directory0.inode0=1;
+
+
+	numberWrited=write(fd,ptr_dir,16);
 
 
 }
@@ -439,6 +662,9 @@ void init_bootBlock(){
 
 int sh_initfs(char **args)
 {
+	//check wheather
+
+
    //trouble shooting print out
   printf("fsaccess\n");
   printf( "You entered: %s %s %s %s \n ", args[0],args[1], args[2],args[3]);
@@ -450,6 +676,8 @@ int sh_initfs(char **args)
 
 
 
+
+//check whether the following file path existed, if yes, then ask if overwrited,other wise creat a new disk
   //open the file as partition
 int fd=open(args[1],O_RDWR | O_CREAT,0666);
 
@@ -520,9 +748,7 @@ struct superblock sb,*ptr_sb;
 
 
 //initial inode for root directory
-  init_root_directory(fd);
-
-
+  init_directory(1,fd);
 
 
 
