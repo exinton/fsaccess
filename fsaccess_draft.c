@@ -12,20 +12,17 @@
   Function Declarations for builtin shell commands:
  */
 
-int sh_test(char **);
+
 int sh_exit(char **);
 int sh_initfs(char **);
-int sh_ls(char **);
 int sh_cpin(char **);
 int sh_cpout(char **);
 int sh_mkdir(char **);
-int sh_cd(char **);
-int sh_test(char **);
 
-int static currentPathInode=1;
-int static initblock[4]={0,0,0,0};
-char static *selectedDisk;
+
+static int  currentPathInode=1;
 char static fileType[4]="FCDB";
+int static fd=-1;//file descripter for the disk
 
 
 struct superblock {
@@ -69,6 +66,13 @@ struct inode{  //inode's length is 32 in total
 	unsigned short modtime[2];	//time of last modification
 }inode_empty={{0},0,0,0,0,0,{0},{0},{0}};
 
+struct ilist{
+
+	struct inode inodeblock[16];
+
+};
+
+
 struct filesize{
 	unsigned short size1;
 	unsigned char size0;
@@ -100,8 +104,6 @@ struct indirectBlock{
 
 
 
-int static fd;//file descripter for the disk
-
 
 /*
   List of builtin commands, followed by their corresponding functions.
@@ -109,25 +111,19 @@ int static fd;//file descripter for the disk
 
 char *builtin_str[] = {  //pointer to command strings
   "q",
-  "test",
   "initfs",
-  "v6ls",
   "cpin",
   "cpout",
-  "v6mkdir",
-  "v6cd"
+  "v6mkdir"
 };
 
 
 int (*builtin_func[]) (char **) = {  //pointer to  function
   &sh_exit,
-  &sh_test,
   &sh_initfs,
-  &sh_ls,
   &sh_cpin,
   &sh_cpout,
-  &sh_mkdir,
-  &sh_cd
+  &sh_mkdir
 };
 
 int sh_num_builtins() {
@@ -146,34 +142,11 @@ int sh_num_builtins() {
  */
 int sh_exit(char **args) //quit the shell
 {
+	close(fd);
   return 0;
 }
 
-int sh_test(char **args)
-{
 
-
-  selectedDisk=&("disktest");
-  int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
-
-
-  int i;
-  for (i=0;i<900;i=i+1){
-	  printf("get block is %d\n",get_block(fd));
-  }
-
-  return 1;
-
-
-
-
-}
-
-
-
-int checkinodeaddress(){  //return a datablock for inode
-
-}
 
 
 int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
@@ -191,35 +164,33 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 	ptr_indirecrBlock1=&indirectBlock1;
 	indirectBlock0=indirectBlock_empty;
 
+	struct superblock superblock0,*ptr_superblock;
+	ptr_superblock=&superblock0;
+
+	lseek(fd,512,SEEK_SET);
+	read(fd,ptr_superblock,512);
+
+
+
 
 	unsigned int *ptr_fileSizeValue;
 	ptr_fileSizeValue=(unsigned int *)ptr_filesize;
-
 	filesize0.mostsignificant=inode0.inodeFlagStruct.unalloc;
 	filesize0.size0=inode0.size0;
 	filesize0.size1=inode0.size1;
+	printf("filesize is %d \n",*ptr_fileSizeValue);
 
-
-	printf("%d,%d,%d\n",inode0.inodeFlagStruct.unalloc,inode0.size0,inode0.size1);
-	printf("%d,%d,%d\n",filesize0.mostsignificant,filesize0.size0,filesize0.size1);
-	printf("filesize %d \n",*ptr_fileSizeValue);
-
-
-
-	//check the dirlayout
-		lseek(fd,512*2,SEEK_SET);
-		read(fd,ptr_inode,32);
-		printf("address o is %d \n",inode0.address[0]);
 
 	//if the destfile is still small file
-	if ((*ptr_fileSizeValue/512)<8 )
-	{  //file size belongs to small file
+if ((*ptr_fileSizeValue/512)<8 )
+
+		{  //file size belongs to small file
 
 		//assign the datablock to inode
 		int newFileDB=get_block(fd);
 
 		//calculate the address field in Inode to fill
-		int inodeAddrNum=inode0.size1/512;
+		int inodeAddrNum=*ptr_fileSizeValue/512;
 		inode0.address[inodeAddrNum]=newFileDB;
 
 
@@ -227,7 +198,7 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 		int position=lseek(fd,512*newFileDB,SEEK_SET);
 		int numberWrited=write(fd,buffer,size);
 		*ptr_fileSizeValue=*ptr_fileSizeValue+size;
-		printf("size value is %d\n",*ptr_fileSizeValue);
+	//	printf("size value is %d\n",*ptr_fileSizeValue);
 
 		//updated the fileszie
 
@@ -240,24 +211,13 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 		numberWrited=write(fd,ptr_inode,32);
 
 
-		//verify
-		printf("*verify the size* \n");
-		position=lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
-		int numberReaded =read (fd,ptr_inode,32);
-		printf("size0 is %d \n",(unsigned)inode0.size0);
-		printf("size1 is %d \n",inode0.size1);
-		printf("most significant bit is %d \n",inode0.inodeFlagStruct.unalloc);
-
 		return *ptr_fileSizeValue;
 
 	}
 
-	else if((*ptr_fileSizeValue/512)>=8)
+	else if((*ptr_fileSizeValue/512)==8)
 	{
 
-		//get the existing data blocks in address into buffer
-		printf("********************************this is 8****************************** \n");
-		//get 8 additional as address in inode as indirect block
 		unsigned short temp[8];
 		int i;
 		for (i=0;i<8;i=i+1){
@@ -269,16 +229,13 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 
 
 
-		inode0.address[0]=(unsigned short)get_block(fd);
-		printf("inode addres is %d \n",inode0.address[i]);
-		lseek(fd,512*inode0.address[0],SEEK_SET);
-		write(fd,ptr_indirecrBlock,512);  //initial indirect datablocks
 
 
+		for (i=0;i<8;i=i+1){
+			printf("do i run here \n");
+			inode0.address[i]=0;
+			}
 
-		printf("inode is %d\n",inodeFileNum);
-		lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
-		write(fd,ptr_inode,32);		//update into inode
 
 
 
@@ -286,25 +243,23 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 
 		for (i=0;i<8;i=i+1){
 		indirectBlock0.address[i]=temp[i];
-		printf("indirectBlock0.address[%d] is %d \n",i,indirectBlock0.address[i]);
 		}
 
 
-
+		inode0.address[0]=get_block(fd);;
 		indirectBlock0.address[8]=get_block(fd);
 		lseek(fd,512*inode0.address[0],SEEK_SET);
 		write(fd,ptr_indirecrBlock,512);
 
 
 
-
-		printf("indirectBlock0.address[8] is %d \n",indirectBlock0.address[8]);
+	//	printf("indirectBlock0.address[8] is %d \n",indirectBlock0.address[8]);
 
 		//copy content
 		lseek(fd,512*indirectBlock0.address[8],SEEK_SET);
 		write(fd,buffer,size);
 		*ptr_fileSizeValue=*ptr_fileSizeValue+size;
-		printf("size value is %d\n",*ptr_fileSizeValue);
+	//	printf("size value is %d\n",*ptr_fileSizeValue);
 
 		//update size
 		inode0.size1=filesize0.size1;
@@ -313,7 +268,6 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 		inode0.inodeFlagStruct.largeFile=1;
 		inode0.inodeFlagStruct.fileType=0;
 
-
 		lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
 		write(fd,ptr_inode,32);
 
@@ -321,16 +275,20 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 
 	}
 
+
 	else if((*ptr_fileSizeValue/512)>8 && (*ptr_fileSizeValue/(512*256))<7 ){
 
 
 		int newBlock = sizetoblocklarge(fd, *ptr_fileSizeValue,inodeFileNum);
-		printf("new block is %d \n",newBlock);
+//		printf("new block is %d \n",newBlock);
 		lseek(fd,512*newBlock,SEEK_SET);
 		write(fd,buffer,size);
 		*ptr_fileSizeValue=*ptr_fileSizeValue+size;
-		printf("size value is %d\n",*ptr_fileSizeValue);
+	//	printf("size value is %d\n",*ptr_fileSizeValue);
 
+
+		lseek(fd, 512*2+(inodeFileNum-1)*32,SEEK_SET);
+		read(fd,ptr_inode,32);
 
 		//update size
 		inode0.size1=filesize0.size1;
@@ -340,35 +298,38 @@ int bufferCpy(int fd, int inodeFileNum,char buffer[],int size  ){
 
 		lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
 		write(fd,ptr_inode,32);
+		lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
+		read(fd,ptr_inode,32);
+		printf("inode address2 is %d \n",inode0.address[*ptr_fileSizeValue/(256*512)]);
+
 
 		return *ptr_fileSizeValue;
-
-
 		}
 
-	else if(*ptr_fileSizeValue>=7*256*512)//extra large file
+
+	else if(*ptr_fileSizeValue >= 7*256*512)//extra large file
 		{
 
 		//copy 512 byte to the data block
 
-				int blocktowrite=sizetoblockhuge(fd,*ptr_fileSizeValue,inode0.address[7]);
-				printf("blk to write %d \n",blocktowrite);
+				int blocktowrite=sizetoblockhuge(fd,*ptr_fileSizeValue,inodeFileNum);
+			//	printf("blk to write %d \n",blocktowrite);
 				lseek(fd,blocktowrite*512,SEEK_SET);
 				write(fd,buffer,size);
 				*ptr_fileSizeValue=*ptr_fileSizeValue+size;
-					printf("size value is %d\n",*ptr_fileSizeValue);
+			//		printf("size value is %d\n",*ptr_fileSizeValue);
 
 				//update size
+						lseek(fd, 512*2+(inodeFileNum-1)*32,SEEK_SET);
+						read(fd,ptr_inode,32);
+
 						inode0.size1=filesize0.size1;
 						inode0.size0=filesize0.size0;
 						inode0.inodeFlagStruct.unalloc=filesize0.mostsignificant;
-						inode0.inodeFlagStruct.fileType=0;
 
 						lseek(fd,512*2+(inodeFileNum-1)*32,SEEK_SET);
 						write(fd,ptr_inode,32);
-
 						return *ptr_fileSizeValue;
-
 
 
 
@@ -384,25 +345,48 @@ int sizetoblocklarge(int fd, int filesize,int inodeNum){
 
 	struct inode inode0,*ptr_inode;
 	ptr_inode=&inode0;
-	read (fd,ptr_inode,32);
+
+	lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+	read(fd,ptr_inode,32);
+	printf("before inode0 address is %d \n",inode0.address[0]);
+	printf("before inode0 address is %d \n",inode0.address[1]);
+	printf("before inode0 address is %d \n",inode0.address[2]);
 
 	int blocknum=filesize/512;
 	int Level1Num=blocknum/256;
 	int Level2Num=blocknum%256;
+	printf("leve1, level2 are %d %d \n",Level1Num,Level2Num);
+	printf("leve1number %d address is %d \n",Level1Num,inode0.address[Level1Num]);
+
 
 	lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
 	read(fd,ptr_inode,32);
 
-	if(inode0.address[Level1Num]==0){
-		inode0.address[Level1Num]=get_block(fd);
+	if(inode0.address[Level1Num]==0){	//if inode0.address[Level1Num] no assigned with data blocks
+		int blockid=get_block(fd);
+		printf("large bloc id is %d ,level1num is % d\n",blockid,Level1Num);		//??
+		inode0.address[Level1Num]=blockid;		//?
+		printf("after assignment : leve1number %d address is %d \n",Level1Num,inode0.address[Level1Num]);
+		lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+		write(fd,ptr_inode,32);
+		lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+		read(fd,ptr_inode,32);
+		printf("inode address is %d \n",inode0.address[Level1Num]);
 	}
 
-	lseek(fd,512*inode0.address[blocknum/256],SEEK_SET);
+
+	lseek(fd,512*inode0.address[Level1Num],SEEK_SET);
 	read(fd,ptr_indirecrBlock,512);	//read in struct of 1st level indirect block
 
 	if(indirectBlock0.address[Level2Num]==0){
-		indirectBlock0.address[Level2Num]=get_block(fd);
+		int blockid=get_block(fd);
+		indirectBlock0.address[Level2Num]=blockid;
+		lseek(fd,512*inode0.address[Level1Num],SEEK_SET);
+		write(fd,ptr_indirecrBlock,512);
 	}
+	lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+	read(fd,ptr_inode,32);
+	printf("inode1 address is %d \n",inode0.address[Level1Num]);
 
 	return indirectBlock0.address[Level2Num];
 
@@ -412,37 +396,58 @@ int sizetoblocklarge(int fd, int filesize,int inodeNum){
 
 
 
-int sizetoblockhuge(int fd, int filesize,int Level1blk){ //convert huge file's databloc address when in address[7]
+int sizetoblockhuge(int fd, int filesize,int inodeNum){ //convert huge file's databloc address when in address[7]
 
 	struct indirectBlock indirectBlock0,*ptr_indirecrBlock,indirectBlock1,*ptr_indirecrBlock1;
 	ptr_indirecrBlock=&indirectBlock0;
 	ptr_indirecrBlock1=&indirectBlock1;
 	indirectBlock0=indirectBlock_empty;
+	struct inode inode0,*ptr_inode;
+	ptr_inode=&inode0;
 
-	int effectiveSize=filesize-256*512;
+	int effectiveSize=filesize-256*512*7;
 	int blocknum=effectiveSize/512;
 	int Level1Num=blocknum/256;
 	int Level2Num=blocknum%256;
 
-	lseek(fd,512*Level1blk,SEEK_SET);
-	read(fd,ptr_indirecrBlock,512);	//read in struct of 1st level indirect block
-	if(indirectBlock0.address[Level1Num]==0){
-		indirectBlock0.address[Level1Num]=get_block(fd);
+	lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+	read(fd,ptr_inode,32);
+
+	int blockid;
+
+	if(inode0.address[7]==0){
+		blockid=get_block(fd);
+		inode0.address[7]=blockid;
+		lseek(fd,512*2+(inodeNum-1)*32,SEEK_SET);
+		write(fd,ptr_inode,32);
+
+
 	}
+
+
+	lseek(fd,512*inode0.address[7],SEEK_SET);
+	read(fd,ptr_indirecrBlock,512);	//read in struct of 1st level indirect block
+
+	if(indirectBlock0.address[Level1Num]==0){
+		blockid=get_block(fd);
+		indirectBlock0.address[Level1Num]=blockid;
+		lseek(fd,inode0.address[7]*512,SEEK_SET);	//
+		write(fd,ptr_indirecrBlock,512);
+
+
+	}
+
 	lseek(fd,512*indirectBlock0.address[Level1Num],SEEK_SET);
 	read(fd,ptr_indirecrBlock1,512);
 	if(indirectBlock1.address[Level2Num]==0){
-		indirectBlock1.address[Level2Num]=get_block(fd);
+		blockid=get_block(fd);
+		indirectBlock1.address[Level2Num]=blockid;
+		lseek(fd,512*indirectBlock0.address[Level1Num],SEEK_SET);
+		write(fd,ptr_indirecrBlock1,512);
+
 	}
-	lseek(fd,512*indirectBlock0.address[Level1Num]+indirectBlock1.address[Level2Num],SEEK_SET);
-	unsigned short addressBuffer[1];
-	read(fd,addressBuffer,1);
-	if(addressBuffer[0]!=0){		//if there is datablock, return it
-		return addressBuffer[0];
-	}
-	int blockseq=get_block(fd);		//if there is not address, get data block
-	write(fd,&blocknum,2);
-	return blockseq;
+
+	return indirectBlock1.address[Level2Num];
 
 
 }
@@ -506,22 +511,17 @@ int createFile(int fd, char filename[]){
 int sh_cpin(char **args)
 {
 
-	 //trouble shooting print out
-	  printf("fsaccess\n");
-	  printf( "You entered: %s %s %s \n ", args[0],args[1], args[2]);
+	  if(fd==-1){
+		  printf("please init the dist at first ! \n");
+		  return 1;
+	  }
 
-
-
-	  printf("size of args[2] %d\n",sizeof(args[2]));
-	  printf("size of args[0] %d\n",sizeof(args[1]));
-	  printf("size of args[0] %d\n",sizeof(args[0]));
-	  char *sourceFilePath;
+		  char *sourceFilePath;
 	  sourceFilePath=args[1];
 
 	  char destinationFileName[14];
 	  strcpy(destinationFileName,args[2]);
 
-	  printf("destinationFileName  is %s, size is %d \n",destinationFileName,sizeof(destinationFileName));
 
 	  char buffer[512];
 
@@ -536,9 +536,7 @@ int sh_cpin(char **args)
 
 
 	  //select the right dest file
-	  selectedDisk=&("disktest");
-	  int fdDest=open(selectedDisk,O_RDWR | O_CREAT,0666);
-
+	  int fdDest=fd;
 	  //check whether the file is already there
 
 
@@ -552,13 +550,14 @@ int sh_cpin(char **args)
 
 	  //start to copy
 	  int i=0;
-	  while(i<1792){
-	  int numberReaded=read (fdSource,buffer,512);
-	  printf("copy the %d th block\n",i);
+	  int numberReaded=0;
+	  do{
+	  numberReaded=read (fdSource,buffer,512);
+	  printf("copy the %d th block by reading %d byte\n",i,numberReaded);
 	  printf("assinged inode of new file is %d \n",assignedInode);
 	  int cpystatus=bufferCpy(fdDest,assignedInode,buffer,numberReaded); //size of copying equals to the byte read from source file
 	  i=i+1;
-	  }
+	  }while(numberReaded>=512);
 	//  printf("%d byte copied",cpystatus);
 
 	  return 1;
@@ -567,22 +566,190 @@ int sh_cpin(char **args)
 
 }
 
+
+
 int sh_cpout(char **args)
 {
 
-	//get to the address and find datablock
-	struct inode MyInode,*ptr_inode;
-	ptr_inode=&MyInode;
-	read (fd,ptr_inode,202);
+	  if(fd==-1){
+		  printf("please init the dist at first ! \n");
+		  return 1;
+	  }
+		  char sourceFileName[14];
+		  strcpy(sourceFileName,args[1]);
 
-	//check whether the inode is directory
-	if(MyInode.inodeFlagStruct.fileType!=2){
-		printf("target is not directory");
-		return -1;
+		  int readout;
+		  int fileSize;
+		  char buffer[512];
+
+		  //open source file
+		  //cp souce file's datablock content to destination and descend the count(source file size), as well as increase the destination file's size.
+		  //when the source file's remaingint count is less than 512, handle the last data block properly
+		  //
+		  struct inode inode0,*ptr_inode;
+		  ptr_inode=&inode0;
+
+		  struct superDir dirEntry0,*ptr_dirEntry;
+		  ptr_dirEntry=&dirEntry0;
+		  int inodeNum;
+		  struct indirectBlock indirectBlock0,*ptr_indirecrBlock,indirectBlock1,*ptr_indirecrBlock1;
+		  ptr_indirecrBlock=&indirectBlock0;
+		  ptr_indirecrBlock1=&indirectBlock1;
+		  indirectBlock0=indirectBlock_empty;
+	      struct filesize filesize0,*ptr_filesize;
+		  ptr_filesize=&filesize0;
+		  unsigned int *ptr_fileSizeValue;
+		  ptr_fileSizeValue=(unsigned int *)ptr_filesize;
+
+
+		  //select the right dest file
+		  int fdDest=open(args[2],O_RDWR | O_CREAT,0666);
+		  //check whether the file is already there
+
+
+		  //get inode, assume to be under the root dir.
+		  lseek(fd,512*2+(1-1)*32,SEEK_SET);
+		  printf("we are here\n");
+		  read (fd,ptr_inode,32);
+		  printf("we are here\n");
+		  lseek(fd,512*inode0.address[0],SEEK_SET);
+		  read(fd,ptr_dirEntry,512);
+		  int i;
+
+		  for (i=0;i<32;i=i+1){
+
+			  printf("we have the file inode %d and name %s\n",dirEntry0.superDir[i].inode0,dirEntry0.superDir[i].filename0);
+			  if(strcmp(dirEntry0.superDir[i].filename0,sourceFileName)==0){
+			  inodeNum=dirEntry0.superDir[i].inode0;
+			  printf("we get the file inode %d and name %s\n",dirEntry0.superDir[i].inode0,dirEntry0.superDir[i].filename0);
+
+			  }
+		  }
+
+		  //check sourcefile's size;if it's extra largefile
+			lseek(fd, 512*2+(inodeNum-1)*32,SEEK_SET);
+		 	read(fd,ptr_inode,32);
+
+			filesize0.mostsignificant=inode0.inodeFlagStruct.unalloc;
+			filesize0.size0=inode0.size0;
+			filesize0.size1=inode0.size1;
+		    int remainfileSize=*ptr_fileSizeValue;
+
+		  	printf("remainfile size is %d \n",remainfileSize);
+
+
+	if(*ptr_fileSizeValue>512*256*7){
+
+		//huge
+
+		//copy the large part
+
+		//for byte from 0-512*256*7
+
+		int j;
+		for (i=0;i<7;i=i+1){
+
+			lseek(fd,512*inode0.address[i],SEEK_SET);
+			read(fd,ptr_indirecrBlock,512);
+			for(j=0;j<256;j=j+1)
+				{
+					lseek(fd,512*indirectBlock0.address[j],SEEK_SET);
+					readout=read(fd,buffer,512);
+					write(fdDest,buffer,readout);
+
+				}
+
+		}
+
+		remainfileSize=*ptr_fileSizeValue-512*256*7;
+	  	printf("remainfile size is %d \n",remainfileSize);
+
+		//for byte greater thean 512*256*7
+		lseek(fd,512*inode0.address[7],SEEK_SET);
+		read(fd,ptr_indirecrBlock,512);
+
+		for (i=0;i<256 && remainfileSize>0;i=i+1){
+
+			lseek(fd,512*indirectBlock0.address[i],SEEK_SET);
+			read(fd,ptr_indirecrBlock1,512);
+
+			for (j=0;j<256 && remainfileSize>0;j=j+1){
+
+				lseek(fd,indirectBlock1.address[j]*512,SEEK_SET);
+
+				if(remainfileSize<512)
+					readout=read(fd,buffer,remainfileSize);
+				else
+					readout=read(fd,buffer,512);
+				printf("readout of  file is %d\n",readout);
+				write(fdDest,buffer,readout);
+				remainfileSize=remainfileSize-readout;
+
+			}
+		  	printf("remainfile size is %d \n",remainfileSize);
+
+		}
+
+
+}
+
+
+	if(*ptr_fileSizeValue<=512*256*7 && *ptr_fileSizeValue > 512*8)	//large
+	{
+	int j;
+		for (i=0;i<7 && remainfileSize>0;i=i+1){
+
+			lseek(fd,512*inode0.address[i],SEEK_SET);
+
+			printf("inode address %d \n",inode0.address[i]);
+
+			read(fd,ptr_indirecrBlock,512);
+
+			for(j=0;j<256 && remainfileSize>0;j=j+1)
+			{
+				lseek(fd,512*indirectBlock0.address[j],SEEK_SET);
+
+				if(remainfileSize<512)
+					readout=read(fd,buffer,remainfileSize);
+				else
+					readout=read(fd,buffer,512);
+
+				printf("readout of  file is %d\n",readout);
+				write(fdDest,buffer,readout);
+				remainfileSize=remainfileSize-readout;
+
+			}
+
+		}
+
 
 	}
 
-	 return 1;
+
+if(*ptr_fileSizeValue<=512*8)
+	{	//small
+	int j;
+		for (i=0;i<8 && remainfileSize>0 ;i=i+1){
+			printf("remaining file is %d\n",remainfileSize);
+			lseek(fd,inode0.address[i]*512,SEEK_SET);
+
+			if(remainfileSize<512)
+				readout=read(fd,buffer,remainfileSize);
+			else
+				readout=read(fd,buffer,512);
+
+			printf("readout of  file is %d\n",readout);
+			//printf("handle block %d \n",indirectBlock1.address[j]);
+			write(fdDest,buffer,readout);
+
+			remainfileSize=remainfileSize-readout;
+
+		}
+
+
+	}
+
+
 
 }
 
@@ -590,33 +757,38 @@ int fetch_directoryLayoutentry(int inode,int fd){
 	//get an available entry in directory layout datablock
 		struct superDir dirEntry0,*ptr_dirEntry;
 		ptr_dirEntry=&dirEntry0;
-		struct inode MyInode,*ptr_inode;
-				ptr_inode=&MyInode;
+		struct inode inode0,*ptr_inode;
+		ptr_inode=&inode0;
 
-		lseek(fd,512*2+(inode-1)*32,SEEK_SET);
-		read (fd,ptr_inode,32);
+		printf("the current dir's inode is %d \n",inode);
+		int seeked=lseek(fd,512*2+(inode-1)*32,SEEK_SET);
+		printf("the seek value  %d \n",seeked);
+		read(fd,ptr_inode,32);
 
-		printf("datablock address %d \n",MyInode.address[0]);
-		printf("datablock address %d \n",MyInode.address[1]);
-		printf("datablock address %d \n",MyInode.address[2]);
-		printf("datablock address %d \n",MyInode.address[3]);
-		printf("datablock address %d \n",MyInode.address[4]);
-		printf("datablock address %d \n",MyInode.address[5]);
-		printf("datablock address %d \n",MyInode.address[6]);
-		printf("datablock address %d \n",MyInode.address[7]);
+		printf("datablock address %d \n",inode0.address[0]);
+		printf("datablock address %d \n",inode0.address[1]);
+		printf("datablock address %d \n",inode0.address[2]);
+		printf("datablock address %d \n",inode0.address[3]);
+		printf("datablock address %d \n",inode0.address[4]);
+		printf("datablock address %d \n",inode0.address[5]);
+		printf("datablock address %d \n",inode0.address[6]);
+		printf("datablock address %d \n",inode0.address[7]);
 		printf("get here\n");
+
 		int i,j;
-		for (j=0;j<8 && MyInode.address[j]!=0;j=j+1){					//check all the address in inode
-			lseek(fd,512*MyInode.address[j],SEEK_SET);
-			printf("get here, j is %d , myinode is %d\n",j,MyInode.address[j]);
+		for (j=0;j<8 && inode0.address[j]!=0;j=j+1){					//check all the address in inode
+
+			printf("get here, j is %d , myinode is %d\n",j,inode0.address[j]);
+
+			lseek(fd,512*inode0.address[j],SEEK_SET);
 			read (fd,ptr_dirEntry,512);
 
 			for(i=0;i<32;i=i+1){
 				 printf("%d\n",dirEntry0.superDir[i].inode0);
 				 printf("get here, i is %d\n",i);
 				 if(dirEntry0.superDir[i].inode0==0){
-					printf("get one offset %d \n", 512*MyInode.address[j]+i*16);
-					return 512*MyInode.address[j]+i*16;
+					printf("get one offset %d \n", 512*inode0.address[j]+i*16);
+					return 512*inode0.address[j]+i*16;
 				 }
 
 			}
@@ -629,68 +801,15 @@ int fetch_directoryLayoutentry(int inode,int fd){
 }
 
 
-int sh_cd( char **args)
-{
-	selectedDisk=&("disktest");
-	int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
-
-	struct inode inode0,*ptr_inode;
-	ptr_inode=&inode0;
-	struct superDir superDir0,*ptr_superDir;
-	ptr_superDir=&superDir0;
-
-	lseek(fd,512*2+(currentPathInode-1)*32,SEEK_SET);
-	read (fd,ptr_inode,32);
-
-	//loop
-	int i,j;
-	for (i=0;i<8;i=i+1){
-
-	lseek(fd,512*inode0.address[i],SEEK_SET);
-	read(fd,ptr_superDir,512);
-
-		for(j=0;j<32;j=j+1){
-			if (strcmp(superDir0.superDir[j].filename0,args[1])==0)
-			{
-				//check whether it's directory
-				lseek(fd,512*2+(superDir0.superDir[j].inode0-1)*32,SEEK_SET);
-				read(fd,ptr_inode,32);
-				if(inode0.inodeFlagStruct.fileType==2){
-					currentPathInode=superDir0.superDir[j].inode0;
-					printf("Change directory to %s \n",args[1]);
-					return 1;
-				}
-
-			}
-
-			}
-
-printf("cannot find the directory name %s\n",args[1]);
-return -1;//
-
-	}
-}
 
 
 
 int sh_mkdir(char **args)
 {
-	selectedDisk=&("disktest");
-
-	int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
-	 //trouble shooting print out
-	printf("fsaccess\n");
-	printf( "You entered: %s %s \n ", args[0],args[1]);
-	//char *newDirectory = args[1];
-	//get the file descriptor
-
-
-
-	//CHECK THE PERMIT
-
-	//check same directory name
-
-	//check the length of the directory no more than 15 chars.
+	if(fd==-1){
+	  printf("please init the dist at first ! \n");
+	  return 1;
+	  }
 
 	printf("currentpathinode %d fd %d \n",currentPathInode,fd);
 	int entryAddress=fetch_directoryLayoutentry(currentPathInode,fd);
@@ -704,15 +823,15 @@ int sh_mkdir(char **args)
 
 	int dirInode=get_inode(fd);
 
-	printf("dir inode we get is %d\n",dirInode);
 
 	lseek(fd,entryAddress,SEEK_SET);
 
 	struct dirEntryLayout dirEntry0,*ptr_dirEntry;
 	ptr_dirEntry=&dirEntry0;
+
 	dirEntry0.inode0=dirInode;
 	strncpy(dirEntry0.filename0, args[1],14);			//just string copy 14 byte to directory name
-	int numberWrited=write(fd,ptr_dirEntry,16);
+	write(fd,ptr_dirEntry,16);
 
 	init_directory(fd,dirInode,currentPathInode);
 	//initial the datablock of this directory
@@ -721,88 +840,6 @@ int sh_mkdir(char **args)
 
 }
 
-
-//list the directory layout of current path
-int sh_ls(char **args)
-{
-
-	  //open the file as partition
-	selectedDisk=&("disktest");
-
-	int fd=open(selectedDisk,O_RDWR | O_CREAT,0666);
-	printf("fd is %d,currentpathinode is %d\n",fd,currentPathInode);
-
-	//go to the nfree of the current path inode
-	int position=lseek(fd,512*2+(currentPathInode-1)*32,SEEK_SET);//
-	struct inode inode0,*ptr_inode;
-	ptr_inode=&inode0;
-	read (fd,ptr_inode,32);
-
-	//check the addresses of the inode
-
-	int i;
-	for (i=0;i<8;i=i+1)
-	{
-		printf("inode address %d is %d \n",i,inode0.address[i]);
-		//printf("Dir DB %d addresses are %d \n",i,inode0.address[i]);
-		if(inode0.address[i]!=0)
-		{
-		printf("xxx inside ls loop \n");
-		printDirLayout(fd,inode0.address[i]);
-
-
-		}
-	}
-
-	close(fd);
-return 1;
-
-}
-
-void printDirLayout(int fd, int datablockofDir)
-{
-
-struct inode inode0,*ptr_inode;
-ptr_inode=&inode0;
-
-int position=lseek(fd,512*datablockofDir,SEEK_SET);//
-
-struct superDir directory0,*ptr_directory;
-ptr_directory=&directory0;
-
-struct filesize filesize0,*ptr_filesize;
-ptr_filesize=&filesize0;
-
-unsigned int *ptr_fileSizeValue;
-ptr_fileSizeValue=(unsigned int *)ptr_filesize;
-
-
-
-position=lseek(fd,512*datablockofDir,SEEK_SET);//
-int numberReaded =read (fd,ptr_directory,512);
-
-
-
-
-int i;
-for (i=0;i<32;i=i+1){
-
-	if(directory0.superDir[i].inode0 != 0)
-	{
-
-		lseek(fd,512*2+(directory0.superDir[i].inode0-1)*32,SEEK_SET);//
-		read (fd,ptr_inode,32);
-		filesize0.mostsignificant=inode0.inodeFlagStruct.unalloc;
-		filesize0.size0=inode0.size0;
-		filesize0.size1=inode0.size1;
-
-		printf("check point here in dir!\n");
-		printf("inode: %d, filename: %s filetype: %c filesize:%d Byte\n",directory0.superDir[i].inode0,directory0.superDir[i].filename0,fileType[inode0.inodeFlagStruct.fileType],*ptr_fileSizeValue);
-	}
-
-
-}
-}
 
 
 
@@ -895,39 +932,44 @@ int get_block(int fd){
 	lseek(fd,512*1,SEEK_SET);//
 	read (fd,ptr_superblock,512);
 
-	//printf("superblock nfree %d \n",superblock0.nfree);
-	//printf("superblock free[nfree] %d \n",superblock0.free[superblock0.nfree]);
+	printf("superblock nfree %d \n",superblock0.nfree);
 
 	superblock0.nfree=superblock0.nfree-1;
 
 	//printf("superblock nfree %d \n",superblock0.nfree);
-//	printf("superblock free[nfree] %d \n",superblock0.free[superblock0.nfree]);
+	//printf("superblock free[nfree] %d \n",superblock0.free[superblock0.nfree]);
 	//printf("stuck here3 \n");
 
 	if(superblock0.free[superblock0.nfree]==0){// no free data blocks in SB and DB
 		printf("no block availabe \n");
-		sleep(10);
+
 		return 0;
 
 	}
 
 	else if (superblock0.nfree==0) {
-//		printf("stuck here2 \n");
+
 		int temp=superblock0.free[0];
-//		printf("temp is %d \n",temp);
+		printf("temp is %d \n",temp);
+
 		lseek(fd,512*superblock0.free[0],SEEK_SET);
 
-		int wordsread=read(fd,&superblock0.nfree,2);	//
 
-//		printf("nfree %d words readed\n",wordsread);
-//		printf("ptr_superblock-> %d \n",ptr_superblock->nfree);
+
+		int wordsread=read(fd,&superblock0.nfree,2);	//
+		printf("nfree read from file is %d\n",superblock0.nfree);
+
+		printf("nfree %d words readed\n",wordsread);
+		printf("ptr_superblock-> %d \n",ptr_superblock->nfree);
 		wordsread=read(fd,ptr_superblock->free,200);
-//		printf("free array %d words readed\n",wordsread);
+		printf("free array %d words readed\n",wordsread);
+
 
 		lseek(fd,512*1,SEEK_SET);
 		write(fd,ptr_superblock,512);
 		printf("block %d removed \n",temp);
-		empty_block(temp);
+		printf("superblock nfree %d \n",superblock0.nfree);
+		empty_block(fd,temp);
 		return temp;
 	}
 	else {
@@ -935,8 +977,9 @@ int get_block(int fd){
 		lseek(fd,512*1,SEEK_SET);
 		write(fd,ptr_superblock,512);
 		printf("block %d removed \n",superblock0.free[superblock0.nfree]);
+		printf("superblock nfree %d \n",superblock0.nfree);
 		empty_block(fd,superblock0.free[superblock0.nfree]);
-		return  superblock0.free[superblock0.nfree];
+		return  (int)superblock0.free[superblock0.nfree];
 
 	}
 
@@ -951,7 +994,6 @@ void empty_block(int fd,int blocknum){
 	unsigned char empty[512]={0};
 	write(fd,empty,512);
 
-
 }
 
 //add mutex for inode in the future
@@ -960,23 +1002,16 @@ void empty_block(int fd,int blocknum){
 int free_inode(int fd, int inodeNumber){
 //set the inode valib bit =1;
 
-	  if (inodeNumber <2 ){
-
-		  printf("can not free inode less than 2! or larger than defined\n");
-		  return -1;
-
-		  }
-
-
-
 	  //read the the nfree & free inode array into buffer
 	  struct superblock superblock0,*ptr_superblock;
 	  ptr_superblock=&superblock0;
+	  struct inode inode0,*ptr_inode;
+	  ptr_inode=&inode0;
 	  lseek(fd,1*512,SEEK_SET);
 	  read (fd,ptr_superblock,512);
 
 	  if(superblock0.ninode>=100){
-
+		  printf("now free inode %d \n",100);
 		  return 100;
 	  }
 	  else if(superblock0.ninode<0){
@@ -987,8 +1022,6 @@ int free_inode(int fd, int inodeNumber){
 		  //go the inode offset position
 
 	  lseek(fd,2*512+(inodeNumber-1)*32,SEEK_SET);
-	  struct inode inode0,*ptr_inode;
-	  ptr_inode=&inode0;
 	  read(fd,ptr_inode,32);
 	  inode0.inodeFlagStruct.alloc=0;
 	  lseek(fd,2*512+(inodeNumber-1)*32,SEEK_SET);
@@ -1000,6 +1033,8 @@ int free_inode(int fd, int inodeNumber){
 	  lseek(fd,1*512,SEEK_SET);
 	  write(fd,ptr_superblock,512);
 
+	  printf("now free inode %d \n",inodeNumber);
+
 	  return superblock0.ninode;
 
 	  }
@@ -1008,38 +1043,43 @@ int free_inode(int fd, int inodeNumber){
 
 
 int scan_inodeList(int fd){
-
+	printf("scanning inodes \n");
 
 	struct superblock superblock0,*ptr_superblock;
 	ptr_superblock=&superblock0;
+
 	struct inode inode0,*ptr_inode;
 	ptr_inode=&inode0;
+
+	struct ilist ilist0,*ptr_ilist;
+	ptr_ilist=&ilist0;
+
+
 
 	lseek(fd,1*512,SEEK_SET);
 	read(fd,ptr_superblock,512);
 
 	//get the isize to determin how many inodelist blocks to read
 
-	lseek(fd,2*512,SEEK_SET);
-	int i=0;
+
+	int i,j;
 	int allocatedInode =0;	//number of allocated inode during the scan
 
-	for (i=1;i<=superblock0.isize*16;i=i+1){
-		read(fd,ptr_inode,32);
-		if(inode0.inodeFlagStruct.alloc==0 && allocatedInode<=100){ 	//if alloc is 0 and allocated inode is not greater than 100, continue
 
-			allocatedInode=allocatedInode+1;
-			superblock0.inode[allocatedInode]=i;
+	for (i=0;i<superblock0.isize && allocatedInode<=100;i=i+1){
+		lseek(fd,2*512+i*512,SEEK_SET);
+		read(fd,ptr_ilist,512);
+		for(j=0;j<16 && allocatedInode<=100;j=j+1){
 
+			if(ilist0.inodeblock[j].inodeFlagStruct.alloc==0){ 	//if alloc is 0 and allocated inode is not greater than 100, continue
+				printf("find free inode %d \n",i*16+j+1);
+				free_inode(fd,i*16+j+1);
+				allocatedInode=allocatedInode+1;
+			}
 		}
 
-		//write back the free inode array and ninode to superblock
-		lseek(fd,1*512,SEEK_SET);
-
-		superblock0.ninode=allocatedInode;
-		write(fd,ptr_superblock,512);
-
 	}
+	printf("scanned total %d inodes \n",allocatedInode);
 	return allocatedInode;
 
 
@@ -1049,18 +1089,23 @@ int get_inode(int fd){
 
 	struct superblock superblock0,*ptr_superblock;
 	ptr_superblock=&superblock0;
+
+	struct inode inode0,*ptr_inode;
+	ptr_inode=&inode0;
+
 	superblock0=SB_empty;
 	lseek(fd,1*512,SEEK_SET);
 	read(fd,ptr_superblock,512);
 	//check the inodelist
 	if (superblock0.ninode==0){	//if ninode is 0, read the i-list and place the number of all free inodes(up to 100) into the inode array
+		printf("ninode is 0! \n");
 
 		if(scan_inodeList(fd) >0 ){
 
 			get_inode(fd);
 		}
 		else {
-			printf("no inode number\n ");
+			printf("******************no inode number\n ");
 
 			return 0;
 		}
@@ -1073,6 +1118,14 @@ int get_inode(int fd){
 		lseek(fd,1*512,SEEK_SET);
 		write(fd,ptr_superblock,512);
 
+		//update the allocated bit
+		lseek(fd,512*2+(superblock0.inode[superblock0.ninode]-1)*32,SEEK_SET);
+		read(fd,ptr_inode,32);
+		inode0.inodeFlagStruct.alloc=1;
+		lseek(fd,512*2+(superblock0.inode[superblock0.ninode]-1)*32,SEEK_SET);
+		write(fd,ptr_inode,32);
+
+		printf("now allocated inode %d \n",superblock0.inode[superblock0.ninode]);
 		return superblock0.inode[superblock0.ninode];
 
 	}
@@ -1103,6 +1156,7 @@ void initFileInode(int fd, int inodeFileNum){
 
 int init_inode(int fd, int inode){
 	//
+
 	struct inode inode0, *ptr_inode;
 	ptr_inode=&inode0;
 	inode0=inode_empty;
@@ -1142,13 +1196,13 @@ void init_directory(int fd,int selfInode,int parentInode){
 	inode0=inode_empty;
 
 
-
+	printf("stop \n");
 	int blockNumber=get_block(fd);
 	printf("assigned block number is %d",blockNumber);
 	inode0.address[0]=blockNumber;
 
 	//get inode' address
-	lseek(fd,2*512+(selfInode-1)*32,SEEK_SET);
+
 	printf("address id %d",inode0.address[0]);
 	inode0.size1=512;
 	inode0.modtime[0]=(unsigned short) time(NULL);
@@ -1162,15 +1216,15 @@ void init_directory(int fd,int selfInode,int parentInode){
 	inode0.inodeFlagStruct.setUid=1;
 	inode0.inodeFlagStruct.wregrp=1;
 	inode0.inodeFlagStruct.writeOwner=1;
-
-	int numberWrited=write(fd,ptr_inode,32);
+	lseek(fd,2*512+(selfInode-1)*32,SEEK_SET);
+	write(fd,ptr_inode,32);
 
 
 
 	//manipulate the data blocks
 
 
-	lseek(fd,512*blockNumber,SEEK_SET);
+
 
 	struct superDir directory0,*ptr_dir;
 	ptr_dir=&directory0;
@@ -1182,24 +1236,8 @@ void init_directory(int fd,int selfInode,int parentInode){
 	strcpy(directory0.superDir[1].filename0,"..");
 	directory0.superDir[1].inode0=parentInode;	//parent
 
-
-	numberWrited=write(fd,ptr_dir,512);
-
-
-}
-
-
-
-
-
-void init_directoryDataBlock(int df,int *dirDBArray){
-
-}
-
-
-
-void init_superBlock(int fd,int n1,int n2){
-
+	lseek(fd,512*blockNumber,SEEK_SET);
+	write(fd,ptr_dir,512);
 
 
 }
@@ -1208,12 +1246,7 @@ void init_superBlock(int fd,int n1,int n2){
 
 int sh_initfs(char **args)
 {
-	//check wheather
 
-
-   //trouble shooting print out
-  printf("fsaccess\n");
-  printf( "You entered: %s %s %s %s \n ", args[0],args[1], args[2],args[3]);
   int n1 = atoi(args[2]);
   int n2 = atoi(args[3]);
   int freeblocks = n1-2-nisize(n2);		//total number of free datablocks in the volume
@@ -1222,7 +1255,7 @@ int sh_initfs(char **args)
 
 //check whether the following file path existed, if yes, then ask if overwrited,other wise creat a new disk
   //open the file as partition
-int fd=open(args[1],O_RDWR | O_CREAT,0666);
+  fd=open(args[1],O_RDWR | O_CREAT,0666);
 
 
 //init super block
@@ -1256,23 +1289,18 @@ int numberWrited=write(fd,ptr_superblock,512);
 
 //add blocks
 	 int i;
-  for (i=0;i<freeblocks;i=i+1){
- 	   	//printf("add block %d \n",i);
-	  add_block(fd,i+2+nisize(n2));
-	//  printf("add block %d\n",i+2+nisize(n2));
+  for (i=2+nisize(n2)+1;i<n1-1;i=i+1){
 
+	  add_block(fd,i);
 
  	   }
 
 //remove blocks
 
 //for (i=0;i<freeblocks-1;i=i+1){
-   	//printf("add block %d \n",i);
 //	get_block(fd);
-//  printf("add block %d\n",i+2+nisize(n2));
 
-
-  // }
+//  }
 
 
 
@@ -1282,30 +1310,37 @@ int numberWrited=write(fd,ptr_superblock,512);
   //  init_inode(fd, inodeDirInput);
 
   for (i=1;i<=n2;i=i+1){
-
+	 // printf("now is %d \n",i);
 	  //initialize the inode
 	  init_inode(fd,n2);
 
 
   }
+
   //add inode into inodelist
+  printf(" inode add part begin here! \n");
+  for (i=1;i<=n2;i=i+1){
 
-  for (i=2;i<=120;i=i+1){
-
-	  int nInode=free_inode(fd,i);
-
-
+	  free_inode(fd,i);
 
   }
 
+// printf(" start to get inode \n");
+//  for (i=1;i<=5;i=i+1){
+
+//	  int nInode=get_inode(fd);
+
+//  }
 
 
+
+
+  printf(" initial directory part begin here! \n");
   //initial inode for root directory
     init_directory(fd,1,1);
     currentPathInode=1;
 
-
-  close(fd);
+   printf("fd is %d \n",fd);
 
  return 1;
 }
