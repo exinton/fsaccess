@@ -1,0 +1,76 @@
+v6 file system command line guildline:
+
+target file server: cs2.utdallas.edu
+
+1.compile:
+
+{cslinux2:~/Course/operating system/project3} gcc fssacess.c -o fssacess
+{cslinux2:~/Course/operating system/project3}
+
+
+2.enter the v6 file system:
+	
+{cslinux2:~/Course/operating system/project3} ./fssacess
+Customized Unix V6 file system >
+
+3.init new disk:
+
+Customized Unix V6 file system > initfs v6disk 65536 160
+New disk initialized!
+Customized Unix V6 file system >
+
+4.init exist disk:  (inifs with existing disk must be done after exit and reenter the fsaccess,other wise segmentation fault will appear)
+
+Customized Unix V6 file system > initfs v6disk
+Existing disk initialized!
+
+5.list the file under current directory
+Customized Unix V6 file system > ls
+Directory Layout:
+inode: 98, filename: . filetype: D filesize:512 Byte
+inode: 99, filename: .. filetype: D filesize:512 Byte
+inode: 97, filename: insidefile filetype: F filesize:3552 Byte
+
+
+6. cpin the file into v6file system from exiting unix system
+Customized Unix V6 file system > cpin testfile insidefile1
+Copying:
+*******
+
+7.cpout the file inside v6 file system to external system
+Customized Unix V6 file system > cpout insidefile externalfile
+copying start:
+*******
+
+8.cd
+Customized Unix V6 file system > ls
+Directory Layout:
+inode: 1, filename: . filetype: D filesize:512 Byte
+inode: 1, filename: .. filetype: D filesize:512 Byte
+inode: 100, filename: insidefile filetype: F filesize:3552 Byte
+inode: 99, filename: testdir filetype: D filesize:512 Byte
+Customized Unix V6 file system > cd testdir
+Change directory to testdir
+Customized Unix V6 file system > ls
+Directory Layout:
+inode: 99, filename: . filetype: D filesize:512 Byte
+inode: 1, filename: .. filetype: D filesize:512 Byte
+inode: 98, filename: dir3 filetype: D filesize:512 Byte
+Customized Unix V6 file system > cd dir3
+Change directory to dir3
+Customized Unix V6 file system > ls
+Directory Layout:
+inode: 98, filename: . filetype: D filesize:512 Byte
+inode: 99, filename: .. filetype: D filesize:512 Byte
+inode: 97, filename: insidefile filetype: F filesize:3552 Byte
+Customized Unix V6 file system >
+
+
+
+
+
+
+
+
+
+
